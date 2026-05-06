@@ -1,0 +1,102 @@
+name: Release
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: go/go.sum
+
+      - name: Validate semver tag
+        run: |
+          if ! echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: tag '${{ github.ref_name }}' is not valid semver (expected vX.Y.Z)"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: go test ./... -race -count=1 -timeout 60s
+
+      - name: Update CHANGELOG.md
+        uses: orhun/git-cliff-action@c93ef52f3d0ddcdcc9bd5447d98d458a11cd4f72  # v4
+        with:
+          config: go/cliff.toml
+          args: --output go/CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@c93ef52f3d0ddcdcc9bd5447d98d458a11cd4f72  # v4
+        id: changelog
+        with:
+          config: go/cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ github.ref_name }}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ctxgate-linux-amd64   ./cmd/ctxgate
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ctxgate-linux-arm64   ./cmd/ctxgate
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ctxgate-darwin-amd64  ./cmd/ctxgate
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ctxgate-darwin-arm64  ./cmd/ctxgate
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o dist/ctxgate-windows-amd64.exe ./cmd/ctxgate
+
+      - name: Generate checksums
+        run: cd dist && sha256sum ctxgate-* > checksums.txt
+
+      - name: Sign checksums
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          echo "$SIGNING_KEY" | base64 -d > /tmp/signing.pem
+          openssl pkey -in /tmp/signing.pem -noout
+          openssl pkeyutl -sign -inkey /tmp/signing.pem -rawin -in go/dist/checksums.txt \
+            | xxd -p -c 256 | tr -d '\n' > go/dist/checksums.txt.sig
+          rm /tmp/signing.pem
+          [ -s go/dist/checksums.txt.sig ] || { echo "ERROR: checksums.txt.sig is empty"; exit 1; }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # v2
+        with:
+          body: ${{ steps.changelog.outputs.content }}
+          files: |
+            go/dist/ctxgate-linux-amd64
+            go/dist/ctxgate-linux-arm64
+            go/dist/ctxgate-darwin-amd64
+            go/dist/ctxgate-darwin-arm64
+            go/dist/ctxgate-windows-amd64.exe
+            go/dist/checksums.txt
+            go/dist/checksums.txt.sig
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa5c9a12db59  # v2
+        with:
+          subject-path: go/dist/ctxgate-*

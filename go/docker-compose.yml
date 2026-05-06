@@ -1,0 +1,10 @@
+services:
+  dev:
+    build: .
+    volumes:
+      - .:/app
+      - gomod_cache:/go/pkg/mod
+    working_dir: /app
+
+volumes:
+  gomod_cache:
