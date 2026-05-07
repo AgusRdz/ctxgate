@@ -1,6 +1,8 @@
 # Build output
 go/dist/
 go/bin/
+go/ctxgate
+go/ctxgate.exe
 go/coverage.out
 
 # OS
