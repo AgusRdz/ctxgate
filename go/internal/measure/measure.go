@@ -13,6 +13,7 @@ import (
 	"github.com/agusrdz/ctxgate/internal/hookio"
 	"github.com/agusrdz/ctxgate/internal/pathsafe"
 	"github.com/agusrdz/ctxgate/internal/sessionstore"
+	"github.com/agusrdz/ctxgate/internal/trends"
 )
 
 const (
@@ -511,6 +512,26 @@ func SessionEndFlush(sessionID, snapshotDir string) error {
 
 	// Capture compaction snapshot.
 	_ = compactCaptureWithID(snapshotDir, "end", sessionID)
+
+	// Write session snapshot to trends.db.
+	toolCallCount := 0
+	if sessionID != "" {
+		if store, err := sessionstore.Open(sessionID, snapshotDir); err == nil {
+			if logs, err := store.GetActivityLog(10000); err == nil {
+				toolCallCount = len(logs)
+			}
+			store.Close()
+		}
+	}
+	dbPath := filepath.Join(snapshotDir, "trends.db")
+	if w, err := trends.NewWriter(dbPath); err == nil {
+		_ = w.RecordSnapshot(trends.SessionSnapshot{
+			SessionID:     sessionID,
+			ToolCallCount: toolCallCount,
+		})
+		w.Close()
+	}
+
 	return nil
 }
 

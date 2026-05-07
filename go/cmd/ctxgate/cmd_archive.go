@@ -14,6 +14,7 @@ import (
 	"github.com/agusrdz/ctxgate/internal/pathsafe"
 	"github.com/agusrdz/ctxgate/internal/pluginenv"
 	"github.com/agusrdz/ctxgate/internal/sessionstore"
+	"github.com/agusrdz/ctxgate/internal/trends"
 	"github.com/spf13/cobra"
 )
 
@@ -155,6 +156,20 @@ func runArchiveResult() {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetEscapeHTML(false)
 		_ = enc.Encode(out)
+
+		previewTokens := len(preview) / 4
+		if savedTokens := tokenEst - previewTokens; savedTokens > 0 {
+			dbPath := filepath.Join(snapshotDir, "trends.db")
+			if w, err := trends.NewWriter(dbPath); err == nil {
+				_ = w.RecordSavings(trends.SavingsEvent{
+					SessionID:   sessionID,
+					ToolName:    "mcp-archive",
+					RawTokens:   tokenEst,
+					SavedTokens: savedTokens,
+				})
+				w.Close()
+			}
+		}
 	}
 }
 
