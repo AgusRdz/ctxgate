@@ -1,3 +1,7 @@
+# Agent and planning docs (local only)
+CLAUDE.md
+PLAN.md
+
 # Build output
 go/dist/
 go/bin/
