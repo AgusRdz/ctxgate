@@ -19,6 +19,8 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
+	updateCleanupOld()
+
 	rootCmd.PersistentFlags().BoolVar(&quiet, "quiet", false, "suppress non-essential output")
 
 	rootCmd.AddCommand(newVersionCmd())

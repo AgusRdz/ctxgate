@@ -216,15 +216,42 @@ func updateAtomicReplace(dst string, data []byte) error {
 	if err := os.WriteFile(tmp, data, 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		// Windows: the running binary may be locked; retry once after a brief pause.
-		time.Sleep(10 * time.Millisecond)
-		if err2 := os.Rename(tmp, dst); err2 != nil {
-			os.Remove(tmp)
-			return err2
-		}
+
+	// Fast path: direct rename works on Linux/macOS and on Windows when the
+	// binary is not currently running (e.g. called from a script).
+	if err := os.Rename(tmp, dst); err == nil {
+		return nil
 	}
+
+	// Windows cannot rename onto a running executable, but it *can* rename the
+	// running exe to a different name in the same directory.  So we move the
+	// current binary out of the way first, then slot in the new one.
+	old := dst + ".old"
+	os.Remove(old) // clean up any leftover from a previous update attempt
+	if err := os.Rename(dst, old); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("move current binary: %w", err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		// Restore original so the user still has a working binary.
+		os.Rename(old, dst)
+		os.Remove(tmp)
+		return err
+	}
+	// .old cannot be deleted while this process runs; best-effort cleanup.
+	// updateCleanupOld() will remove it on the next invocation.
+	os.Remove(old)
 	return nil
+}
+
+// updateCleanupOld removes a leftover .old binary from a previous self-update.
+// Called at process start so the locked file is gone before the new run begins.
+func updateCleanupOld() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	os.Remove(exe + ".old")
 }
 
 func updateIsNewer(latest, current string) bool {
