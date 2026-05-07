@@ -11,3 +11,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+*.pem
+!public_key.pem
