@@ -78,10 +78,10 @@ jobs:
           set -euo pipefail
           echo "$SIGNING_KEY" | base64 -d > /tmp/signing.pem
           openssl pkey -in /tmp/signing.pem -noout
-          openssl pkeyutl -sign -inkey /tmp/signing.pem -rawin -in go/dist/checksums.txt \
-            | xxd -p -c 256 | tr -d '\n' > go/dist/checksums.txt.sig
+          openssl pkeyutl -sign -inkey /tmp/signing.pem -rawin -in dist/checksums.txt \
+            | xxd -p -c 256 | tr -d '\n' > dist/checksums.txt.sig
           rm /tmp/signing.pem
-          [ -s go/dist/checksums.txt.sig ] || { echo "ERROR: checksums.txt.sig is empty"; exit 1; }
+          [ -s dist/checksums.txt.sig ] || { echo "ERROR: checksums.txt.sig is empty"; exit 1; }
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # v2
