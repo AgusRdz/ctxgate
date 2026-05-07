@@ -329,7 +329,7 @@ func (s *SessionStore) UpsertCachedContent(filePath, content, hash string) error
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO cached_content (file_path, content, content_hash, cached_at)
 		VALUES (?, ?, ?, ?)`,
-		filePath, content, hash, unixNowFloat(),
+		filePath, content, hash, unixNow(),
 	)
 	return absorbLocked(err)
 }
@@ -394,6 +394,155 @@ func (s *SessionStore) GetHighValueOutputs(minTokens, limit int) ([]ToolOutputRo
 	return result, rows.Err()
 }
 
+// InsertToolOutput inserts a record into tool_outputs (INSERT OR IGNORE).
+func (s *SessionStore) InsertToolOutput(toolUseID, toolName, toolType, commandOrPath, outputHash string, outputChars, outputTokensEst int, compressedPreview string) error {
+	if s.sizeExceeded() {
+		return nil
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO tool_outputs
+		(tool_use_id, tool_name, tool_type, command_or_path,
+		 output_hash, output_chars, output_tokens_est, compressed_preview, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		toolUseID, toolName, toolType, commandOrPath,
+		outputHash, outputChars, outputTokensEst, compressedPreview, unixNow(),
+	)
+	return absorbLocked(err)
+}
+
+// GetMeta retrieves a value from session_meta by key, or "" if not found.
+func (s *SessionStore) GetMeta(key string) (string, error) {
+	var val string
+	err := s.db.QueryRow(`SELECT value FROM session_meta WHERE key = ?`, key).Scan(&val)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return val, absorbLocked(err)
+}
+
+// SetMeta inserts or replaces a key-value pair in session_meta.
+func (s *SessionStore) SetMeta(key, value string) error {
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO session_meta (key, value) VALUES (?, ?)`, key, value)
+	return absorbLocked(err)
+}
+
+// InsertContextIntelEvent appends a summary event to context_intel_events.
+func (s *SessionStore) InsertContextIntelEvent(toolName, toolUseID, summary string, outputChars int) error {
+	if s.sizeExceeded() {
+		return nil
+	}
+	_, err := s.db.Exec(`INSERT INTO context_intel_events
+		(tool_name, tool_use_id, summary, output_chars, timestamp)
+		VALUES (?, ?, ?, ?, ?)`,
+		toolName, toolUseID, summary, outputChars, unixNow(),
+	)
+	return absorbLocked(err)
+}
+
+// CountContextIntelEventsSince counts events logged after the given Unix timestamp.
+func (s *SessionStore) CountContextIntelEventsSince(since float64) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM context_intel_events WHERE timestamp > ?`, since).Scan(&n)
+	if err != nil {
+		return 0, absorbLocked(err)
+	}
+	return n, nil
+}
+
+// InsertActivityLog appends a row to activity_log.
+func (s *SessionStore) InsertActivityLog(toolName, toolBucket string, hasError bool) error {
+	if s.sizeExceeded() {
+		return nil
+	}
+	errInt := 0
+	if hasError {
+		errInt = 1
+	}
+	_, err := s.db.Exec(`INSERT INTO activity_log (tool_name, tool_bucket, has_error, timestamp)
+		VALUES (?, ?, ?, ?)`, toolName, toolBucket, errInt, unixNow())
+	return absorbLocked(err)
+}
+
+// DetectCurrentMode queries the activity_log, prunes if needed, and returns
+// the current session mode string ("code", "debug", "review", "infra", "general").
+func (s *SessionStore) DetectCurrentMode(windowSize, pruneThreshold, pruneKeep int) string {
+	rows, err := s.db.Query(
+		`SELECT tool_bucket, has_error FROM activity_log ORDER BY id DESC LIMIT ?`, windowSize,
+	)
+	if err != nil {
+		return "general"
+	}
+	type row struct {
+		bucket   string
+		hasError bool
+	}
+	var recent []row
+	for rows.Next() {
+		var r row
+		var errInt int
+		if rows.Scan(&r.bucket, &errInt) == nil {
+			r.hasError = errInt != 0
+			recent = append(recent, r)
+		}
+	}
+	rows.Close()
+
+	// Prune if needed.
+	var total int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM activity_log`).Scan(&total)
+	if total > pruneThreshold {
+		_, _ = s.db.Exec(
+			`DELETE FROM activity_log WHERE id NOT IN `+
+				`(SELECT id FROM activity_log ORDER BY id DESC LIMIT ?)`, pruneKeep,
+		)
+	}
+
+	if len(recent) < 3 {
+		return "general"
+	}
+
+	editCount, readCount, infraCount, webCount, bashOther := 0, 0, 0, 0, 0
+	hasRecentErrors := false
+	for _, r := range recent {
+		if r.hasError {
+			hasRecentErrors = true
+		}
+		switch r.bucket {
+		case "edit":
+			editCount++
+		case "read":
+			readCount++
+		case "bash_infra", "bash_git", "bash_install":
+			infraCount++
+		case "web":
+			webCount++
+		case "bash_other":
+			bashOther++
+		}
+	}
+
+	switch {
+	case infraCount >= 3:
+		return "infra"
+	case hasRecentErrors && readCount >= 3 && editCount <= 1:
+		return "debug"
+	case editCount >= 4:
+		return "code"
+	case readCount >= 4 && editCount == 0:
+		return "review"
+	case webCount >= 3:
+		return "review"
+	case editCount >= 2 && (bashOther >= 2 || readCount >= 2):
+		return "code"
+	default:
+		return "general"
+	}
+}
+
+// unixNow returns the current time as a Unix timestamp (float64 seconds).
+func unixNow() float64 {
+	return float64(time.Now().UnixNano()) / 1e9
+}
+
 // CleanupOldStores deletes session DB files older than maxAgeHours in snapshotDir.
 // Returns the number of files deleted.
 func CleanupOldStores(snapshotDir string, maxAgeHours int) (int, error) {
@@ -431,6 +580,3 @@ func sqlNullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }
 
-func unixNowFloat() float64 {
-	return float64(time.Now().UnixNano()) / 1e9
-}
