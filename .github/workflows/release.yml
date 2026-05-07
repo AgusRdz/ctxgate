@@ -97,6 +97,6 @@ jobs:
             go/dist/checksums.txt.sig
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa5c9a12db59  # v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
         with:
           subject-path: go/dist/ctxgate-*
