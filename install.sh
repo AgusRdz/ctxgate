@@ -141,16 +141,35 @@ install -m 755 "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY}"
 info "Installed ${BINARY} ${TAG} to ${INSTALL_DIR}/${BINARY}"
 
 # ---------------------------------------------------------------------------
-# PATH check
+# PATH registration
 # ---------------------------------------------------------------------------
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*)
+    info "Already in PATH."
     ;;
   *)
-    warn "${INSTALL_DIR} is not in your PATH."
-    warn "Add it to your shell profile, e.g.:"
-    warn "  echo 'export PATH=\"\${HOME}/.local/bin:\${PATH}\"' >> ~/.bashrc"
-    warn "Then run: source ~/.bashrc   (or open a new terminal)"
+    # Detect shell profile
+    case "${SHELL:-}" in
+      */zsh)  PROFILE="${ZDOTDIR:-${HOME}}/.zshrc" ;;
+      */bash) PROFILE="${HOME}/.bashrc" ;;
+      *)
+        if [ -f "${HOME}/.zshrc" ]; then
+          PROFILE="${HOME}/.zshrc"
+        else
+          PROFILE="${HOME}/.bashrc"
+        fi
+        ;;
+    esac
+
+    EXPORT_LINE="export PATH=\"${INSTALL_DIR}:\${PATH}\""
+
+    if ! grep -qF "${INSTALL_DIR}" "${PROFILE}" 2>/dev/null; then
+      printf '\n# ctxgate\n%s\n' "${EXPORT_LINE}" >> "${PROFILE}"
+      info "Added ${INSTALL_DIR} to PATH in ${PROFILE}"
+    fi
+
+    info "Activate in this session:"
+    info "  source ${PROFILE}"
     ;;
 esac
 

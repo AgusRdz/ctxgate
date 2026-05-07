@@ -185,15 +185,16 @@ Write-Info "Installed ctxgate $Tag to $DestPath"
 Remove-TempFiles
 
 # ---------------------------------------------------------------------------
-# PATH check
+# PATH registration
 # ---------------------------------------------------------------------------
 $CurrentPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
 if ($CurrentPath -notlike "*$InstallDir*") {
-    Write-Warn "$InstallDir is not in your user PATH."
-    Write-Warn "Add it permanently with:"
-    Write-Warn "  `$env:PATH += `";$InstallDir`""
-    Write-Warn "  [System.Environment]::SetEnvironmentVariable('PATH', `$env:PATH, 'User')"
-    Write-Warn "Then open a new terminal."
+    $NewPath = if ($CurrentPath) { "$CurrentPath;$InstallDir" } else { $InstallDir }
+    [System.Environment]::SetEnvironmentVariable('PATH', $NewPath, 'User')
+    $env:PATH = "$env:PATH;$InstallDir"
+    Write-Info "Added $InstallDir to PATH (effective immediately)."
+} else {
+    Write-Info "$InstallDir already in PATH."
 }
 
 if ($SupportsColor) {
