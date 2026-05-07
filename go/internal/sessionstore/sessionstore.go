@@ -142,6 +142,14 @@ type ToolOutputRowFull struct {
 	Timestamp         float64
 }
 
+// ActivityLogRow is a query result row from GetActivityLog.
+type ActivityLogRow struct {
+	ToolName   string
+	ToolBucket string
+	HasError   bool
+	Timestamp  float64
+}
+
 // SessionStore wraps a SQLite connection for a single session.
 type SessionStore struct {
 	db        *sql.DB
@@ -651,6 +659,28 @@ func (s *SessionStore) GetRecentToolOutputs(limit int) ([]ToolOutputRowFull, err
 		var r ToolOutputRowFull
 		if rows.Scan(&r.ToolUseID, &r.ToolName, &r.CommandOrPath, &r.OutputTokensEst,
 			&r.CompressedPreview, &r.Timestamp) == nil {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+// GetActivityLog returns recent activity_log rows, most recent first.
+func (s *SessionStore) GetActivityLog(limit int) ([]ActivityLogRow, error) {
+	rows, err := s.db.Query(
+		`SELECT tool_name, tool_bucket, has_error, timestamp
+		 FROM activity_log ORDER BY id DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ActivityLogRow
+	for rows.Next() {
+		var r ActivityLogRow
+		var errInt int
+		if rows.Scan(&r.ToolName, &r.ToolBucket, &errInt, &r.Timestamp) == nil {
+			r.HasError = errInt != 0
 			result = append(result, r)
 		}
 	}
