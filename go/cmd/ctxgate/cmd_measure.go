@@ -1,8 +1,9 @@
 package main
 
 import (
-	"errors"
-
+	"github.com/agusrdz/ctxgate/internal/hookio"
+	"github.com/agusrdz/ctxgate/internal/measure"
+	"github.com/agusrdz/ctxgate/internal/pluginenv"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +32,9 @@ func newMeasureEnsureHealthCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ensure-health",
 		Short: "SessionStart — verify session store health",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return measure.EnsureHealth(pluginenv.ResolveSnapshotDir())
+		},
 	}
 }
 
@@ -41,7 +44,9 @@ func newMeasureQualityCacheCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "quality-cache",
 		Short: "SessionStart / UserPromptSubmit — run quality cache check",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return measure.QualityCache(pluginenv.ResolveSnapshotDir(), force, warn)
+		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "force cache rebuild")
 	cmd.Flags().BoolVar(&warn, "warn", false, "warn-only mode (UserPromptSubmit)")
@@ -54,7 +59,9 @@ func newMeasureCompactCaptureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "compact-capture",
 		Short: "Stop / StopFailure / PreCompact — capture compaction snapshot",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return measure.CompactCapture(pluginenv.ResolveSnapshotDir(), trigger)
+		},
 	}
 	cmd.Flags().StringVar(&trigger, "trigger", "auto", "trigger source: stop, stop-failure, auto")
 	return cmd
@@ -66,7 +73,9 @@ func newMeasureCompactRestoreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "compact-restore",
 		Short: "SessionStart — restore compaction snapshot",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return measure.CompactRestore(pluginenv.ResolveSnapshotDir(), newSessionOnly)
+		},
 	}
 	cmd.Flags().BoolVar(&newSessionOnly, "new-session-only", false, "only restore for brand-new sessions")
 	return cmd
@@ -76,7 +85,10 @@ func newMeasureDynamicCompactInstructionsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "dynamic-compact-instructions",
 		Short: "PreCompact — emit dynamic compaction instructions",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hookInput, _ := hookio.ReadStdinJSON(hookio.MaxBytes)
+			return measure.DynamicCompactInstructions(hookInput)
+		},
 	}
 }
 
@@ -86,7 +98,10 @@ func newMeasureCheckpointTriggerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkpoint-trigger",
 		Short: "PreToolUse[Agent|Task] — trigger checkpoint if milestone reached",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hookInput, _ := hookio.ReadStdinJSON(hookio.MaxBytes)
+			return measure.CheckpointTrigger(hookInput, milestone)
+		},
 	}
 	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone name (e.g. pre-fanout)")
 	return cmd
@@ -96,6 +111,10 @@ func newMeasureSessionEndFlushCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "session-end-flush",
 		Short: "SessionEnd — flush session data and run detectors",
-		RunE:  func(cmd *cobra.Command, args []string) error { return errors.New("not implemented") },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hookInput, _ := hookio.ReadStdinJSON(hookio.MaxBytes)
+			sessionID, _ := hookInput["session_id"].(string)
+			return measure.SessionEndFlush(sessionID, pluginenv.ResolveSnapshotDir())
+		},
 	}
 }

@@ -123,6 +123,25 @@ type ToolOutputRow struct {
 	CompressedPreview string
 }
 
+// IntelEventRow is a query result from GetIntelEvents.
+type IntelEventRow struct {
+	ToolName    string
+	ToolUseID   string
+	Summary     string
+	OutputChars int
+	Timestamp   float64
+}
+
+// ToolOutputRowFull is returned by GetRecentToolOutputs.
+type ToolOutputRowFull struct {
+	ToolUseID         string
+	ToolName          string
+	CommandOrPath     string
+	OutputTokensEst   int
+	CompressedPreview string
+	Timestamp         float64
+}
+
 // SessionStore wraps a SQLite connection for a single session.
 type SessionStore struct {
 	db        *sql.DB
@@ -574,6 +593,68 @@ func CleanupOldStores(snapshotDir string, maxAgeHours int) (int, error) {
 		}
 	}
 	return deleted, nil
+}
+
+// GetIntelEvents returns recent context intel events, most recent first.
+func (s *SessionStore) GetIntelEvents(limit int) ([]IntelEventRow, error) {
+	rows, err := s.db.Query(
+		`SELECT tool_name, tool_use_id, summary, output_chars, timestamp
+		 FROM context_intel_events ORDER BY id DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []IntelEventRow
+	for rows.Next() {
+		var r IntelEventRow
+		if rows.Scan(&r.ToolName, &r.ToolUseID, &r.Summary, &r.OutputChars, &r.Timestamp) == nil {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+// GetOneTimeReads returns file_reads rows read exactly once, ordered by last_access desc.
+func (s *SessionStore) GetOneTimeReads(limit int) ([]FileReadRow, error) {
+	rows, err := s.db.Query(
+		`SELECT file_path, read_count, tokens_est FROM file_reads
+		 WHERE read_count = 1 ORDER BY last_access DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []FileReadRow
+	for rows.Next() {
+		var r FileReadRow
+		if rows.Scan(&r.FilePath, &r.ReadCount, &r.TokensEst) == nil {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+// GetRecentToolOutputs returns recent tool_outputs rows, most recent first.
+func (s *SessionStore) GetRecentToolOutputs(limit int) ([]ToolOutputRowFull, error) {
+	rows, err := s.db.Query(
+		`SELECT tool_use_id, tool_name, COALESCE(command_or_path,''), output_tokens_est,
+		 COALESCE(compressed_preview,''), timestamp
+		 FROM tool_outputs ORDER BY rowid DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ToolOutputRowFull
+	for rows.Next() {
+		var r ToolOutputRowFull
+		if rows.Scan(&r.ToolUseID, &r.ToolName, &r.CommandOrPath, &r.OutputTokensEst,
+			&r.CompressedPreview, &r.Timestamp) == nil {
+			result = append(result, r)
+		}
+	}
+	return result, nil
 }
 
 func sqlNullString(s string) sql.NullString {
