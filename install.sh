@@ -173,4 +173,13 @@ case ":${PATH}:" in
     ;;
 esac
 
+# ---------------------------------------------------------------------------
+# Wire hooks into Claude Code settings.json
+# ---------------------------------------------------------------------------
+if "${INSTALL_DIR}/${BINARY}" init 2>/dev/null; then
+  : # init printed its own output
+else
+  warn "Hook wiring skipped (run 'ctxgate init' manually)"
+fi
+
 printf "${GREEN}[ctxgate] Done! Run: ctxgate version${NC}\n"

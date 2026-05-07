@@ -197,6 +197,15 @@ if ($CurrentPath -notlike "*$InstallDir*") {
     Write-Info "$InstallDir already in PATH."
 }
 
+# ---------------------------------------------------------------------------
+# Wire hooks into Claude Code settings.json
+# ---------------------------------------------------------------------------
+try {
+    & $DestPath init
+} catch {
+    Write-Warn "Hook wiring skipped: $_. Run 'ctxgate init' manually."
+}
+
 if ($SupportsColor) {
     Write-Host "`e[32m[ctxgate] Done! Run: ctxgate version`e[0m"
 } else {
