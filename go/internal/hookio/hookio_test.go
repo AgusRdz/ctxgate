@@ -79,51 +79,68 @@ func TestReadJSON_NestedObject(t *testing.T) {
 
 // --- EmitPreToolResponse ---
 
-func TestEmitPreToolResponse_Block(t *testing.T) {
-	out := captureStdout(t, func() {
-		EmitPreToolResponse("block", "file too large", `{"before":5000,"after":1200}`)
-	})
-
+func hookOutput(t *testing.T, out string) map[string]any {
+	t.Helper()
 	var m map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out), &m))
-	require.Equal(t, "block", m["type"])
-	require.Equal(t, "file too large", m["reason"])
-	cmp, ok := m["comparison"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, float64(5000), cmp["before"])
+	inner, ok := m["hookSpecificOutput"].(map[string]any)
+	require.True(t, ok, "missing hookSpecificOutput")
+	return inner
 }
 
-func TestEmitPreToolResponse_BlockEmptyComparison(t *testing.T) {
+func TestEmitPreToolResponse_DenyWithReason(t *testing.T) {
 	out := captureStdout(t, func() {
-		EmitPreToolResponse("block", "reason", "")
+		EmitPreToolResponse("deny", "file too large", "")
 	})
 
-	var m map[string]any
-	require.NoError(t, json.Unmarshal([]byte(out), &m))
-	require.Equal(t, "block", m["type"])
-	cmp, ok := m["comparison"].(map[string]any)
-	require.True(t, ok)
-	require.Empty(t, cmp)
+	inner := hookOutput(t, out)
+	require.Equal(t, "PreToolUse", inner["hookEventName"])
+	require.Equal(t, "deny", inner["permissionDecision"])
+	require.Equal(t, "file too large", inner["permissionDecisionReason"])
+	_, hasCtx := inner["additionalContext"]
+	require.False(t, hasCtx)
 }
 
-func TestEmitPreToolResponse_Inject(t *testing.T) {
-	replacement := "# signatures only\ndef foo(x: int) -> str: ..."
+func TestEmitPreToolResponse_DenyWithReasonAndContext(t *testing.T) {
 	out := captureStdout(t, func() {
-		EmitPreToolResponse("inject", "structure map", replacement)
+		EmitPreToolResponse("deny", "file unchanged", "structure map text here")
 	})
 
-	var m map[string]any
-	require.NoError(t, json.Unmarshal([]byte(out), &m))
-	require.Equal(t, "inject", m["type"])
-	require.Equal(t, replacement, m["replacement"])
-	require.Equal(t, "structure map", m["reason"])
+	inner := hookOutput(t, out)
+	require.Equal(t, "deny", inner["permissionDecision"])
+	require.Equal(t, "file unchanged", inner["permissionDecisionReason"])
+	require.Equal(t, "structure map text here", inner["additionalContext"])
+}
+
+func TestEmitPreToolResponse_AdditionalContextOnly(t *testing.T) {
+	out := captureStdout(t, func() {
+		EmitPreToolResponse("", "", "delta context info")
+	})
+
+	inner := hookOutput(t, out)
+	require.Equal(t, "PreToolUse", inner["hookEventName"])
+	_, hasDeny := inner["permissionDecision"]
+	require.False(t, hasDeny, "no permissionDecision for empty decision")
+	require.Equal(t, "delta context info", inner["additionalContext"])
+}
+
+func TestEmitPreToolResponse_AllEmpty(t *testing.T) {
+	out := captureStdout(t, func() {
+		EmitPreToolResponse("", "", "")
+	})
+	require.Empty(t, out)
 }
 
 func TestEmitPreToolResponse_UnknownDecision(t *testing.T) {
+	// unknown decision is treated as non-deny — should still emit with additionalContext
 	out := captureStdout(t, func() {
 		EmitPreToolResponse("unknown", "r", "ctx")
 	})
-	require.Empty(t, out)
+	inner := hookOutput(t, out)
+	_, hasDeny := inner["permissionDecision"]
+	require.False(t, hasDeny)
+	require.Equal(t, "r", inner["permissionDecisionReason"])
+	require.Equal(t, "ctx", inner["additionalContext"])
 }
 
 // --- EmitPostToolResponse ---

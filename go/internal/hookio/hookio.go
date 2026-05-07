@@ -58,32 +58,36 @@ func readJSON(r io.Reader, timeout time.Duration, maxBytes int) (map[string]any,
 	return m, nil
 }
 
-// EmitPreToolResponse writes a block or inject decision to stdout.
+// EmitPreToolResponse writes a hook decision to stdout using the Claude Code
+// hookSpecificOutput format.
 //
-// decision="block":  {"type":"block","reason":"<reason>","comparison":<additionalContext as JSON object>}
-// decision="inject": {"type":"inject","replacement":"<additionalContext>","reason":"<reason>"}
+// decision="deny": sets permissionDecision="deny" in the output
+// decision="":     no permissionDecision (additionalContext-only output)
+// reason:          sets permissionDecisionReason (only if non-empty)
+// additionalContext: sets additionalContext field (only if non-empty)
+//
+// If all three are empty, emits nothing.
 func EmitPreToolResponse(decision, reason, additionalContext string) {
-	var payload map[string]any
-
-	switch decision {
-	case "block":
-		comparison := map[string]any{}
-		if additionalContext != "" {
-			_ = json.Unmarshal([]byte(additionalContext), &comparison)
-		}
-		payload = map[string]any{
-			"type":       "block",
-			"reason":     reason,
-			"comparison": comparison,
-		}
-	case "inject":
-		payload = map[string]any{
-			"type":        "inject",
-			"replacement": additionalContext,
-			"reason":      reason,
-		}
-	default:
+	if decision == "" && reason == "" && additionalContext == "" {
 		return
+	}
+
+	inner := map[string]any{
+		"hookEventName": "PreToolUse",
+	}
+
+	if decision == "deny" {
+		inner["permissionDecision"] = "deny"
+	}
+	if reason != "" {
+		inner["permissionDecisionReason"] = reason
+	}
+	if additionalContext != "" {
+		inner["additionalContext"] = additionalContext
+	}
+
+	payload := map[string]any{
+		"hookSpecificOutput": inner,
 	}
 
 	enc := json.NewEncoder(os.Stdout)
